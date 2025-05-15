@@ -201,7 +201,7 @@ function createZoteroItemFromCsv(headers: string[], values: string[]): { origId:
         {
             id: newId(),
             title: 'USTC',
-            url: `https://www.ustc.ac.uk/editions/${record.id}`,
+            url: `https://www.ustc.ac.uk/editions/${record.sn}`,
             linkMode: '3'
         }
     ]
@@ -252,12 +252,15 @@ function convertJsonToRdf(jsonData: ZoteroData): string {
         rdf += processItem(item);
     }
 
+    /*
     rdf += `
     <z:Collection rdf:about="#collection_${newId('coll_')}">
         <dc:title>ustc</dc:title>
 ${sortedItems.map(item => `        <dcterms:hasPart rdf:resource="#item_${item.id}"/>`).join('\n')}
     </z:Collection>
 </rdf:RDF>`;
+     */
+    rdf += "\n</rdf:RDF>";
 
     return rdf;
 }
