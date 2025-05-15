@@ -512,11 +512,13 @@ function escapeXml(str: string): string {
 
 const writeOutputs = (jsonData: ZoteroData) => {
     const rdfStr = convertJsonToRdf(jsonData);
-    const outputPath = inputPath.split(".")[0] + '.rdf';
+    const outputPath = inputPath.replace(/\.[^/.]+$/, '') + '.rdf';
+    console.log(`Writing RDF to ${outputPath}`);
     fs.writeFileSync(outputPath, rdfStr, 'utf8');
 
-    const relationsPath = inputPath.split(".")[0] + '_relations.json';
+    const relationsPath = inputPath.replace(/\.[^/.]+$/, '') + '_relations.json';
     fs.writeFileSync(relationsPath, JSON.stringify(jsonData.relations, null, 2), 'utf8');
+    console.log(`Writing relations to ${relationsPath}`);
 
     console.log(`Successfully converted ${inputPath} to RDF file`);
 }

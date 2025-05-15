@@ -3,11 +3,14 @@
   "version": "1.0.0",
   "description": "Convert to RDF",
   "type": "module",
-  "scripts": {},
+  "scripts": {
+    "convert": "tsx src/rdf_converter.mts ../out/records.csv"
+  },
   "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.0.0",
     "ts-node": "^10.9.1",
+    "tsx": "^4.19.4",
     "typescript": "^5.0.0"
   }
 }
