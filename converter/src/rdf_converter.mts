@@ -394,7 +394,7 @@ function convertJsonFileToRdf(inputPath: string, outputPath: string): void {
 }
 
 if (process.argv.length < 4) {
-    console.log('Usage: tsx src/rdf_converter.mts <input-json-file> <output-rdf-file>');
+    console.log('Usage: ts-node json-to-rdf.ts <input-json-file> <output-rdf-file>');
     process.exit(1);
 }
 
