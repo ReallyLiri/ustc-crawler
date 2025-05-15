@@ -1,6 +1,5 @@
 import fs from 'fs';
 
-// Define types based on the JSON schema
 interface Person {
     firstName: string;
     lastName: string;
@@ -63,31 +62,25 @@ interface ZoteroItem {
     attachments?: Attachment[];
     memos?: Memo[];
     isReferencedBy?: string[];
-    relatedTo?: string[];
-}
-
-interface ZoteroCollection {
-    id: string;
-    name: string;
-    items?: string[];
-    parentCollection?: string;
 }
 
 interface ZoteroData {
     items: ZoteroItem[];
-    collections?: ZoteroCollection[];
+    relations: Record<string, string[]>;
 }
 
 function parseCsvToJson(csvContent: string): ZoteroData {
-    // Reset ID counter for deterministic IDs
     idCounter = 1;
-    
+
     const lines = csvContent.split('\n');
     const headers = lines[0].split(',').map(header => header.trim());
 
     const items: Record<string, ZoteroItem> = {};
 
-    const clusters: Record<string, string[]> = {};
+    console.log(`Found ${lines.length} lines in CSV file`);
+
+    const origIdToZoteroId: Record<string, string[]> = {};
+
     for (let i = 1; i < lines.length; i++) {
         if (!lines[i].trim()) {
             continue;
@@ -96,31 +89,19 @@ function parseCsvToJson(csvContent: string): ZoteroData {
         const values = parseCSVLine(lines[i]);
         if (values.length !== headers.length) continue;
 
-        const {item, origId} = createZoteroItemFromCsv(headers, values);
+        const {origId, item} = createZoteroItemFromCsv(headers, values);
         items[item.id] = item;
-        clusters[origId] = clusters[origId] || [];
-        clusters[origId].push(item.id);
+
+        origIdToZoteroId[origId] = origIdToZoteroId[origId] || [];
+        origIdToZoteroId[origId].push(item.id);
     }
 
-    // Use sorted keys for consistent processing order
-    const sortedClusterKeys = Object.keys(clusters).sort();
-    
-    for (const origId of sortedClusterKeys) {
-        const ids = clusters[origId];
-        if (ids.length === 1) {
-            continue;
-        }
-        
-        // Sort ids for consistent ordering
-        const sortedIds = [...ids].sort();
-        
-        sortedIds.forEach(id => {
-            items[id].relatedTo = sortedIds.filter(zId => zId !== id);
-        });
+    const singletonIds = Object.keys(origIdToZoteroId).filter(id => origIdToZoteroId[id].length === 1);
+    for (const id of singletonIds) {
+        delete origIdToZoteroId[id];
     }
 
-    // Return items sorted by id
-    return {items: Object.values(items).sort((a, b) => a.id.localeCompare(b.id))};
+    return {items: Object.values(items).sort((a, b) => a.id.localeCompare(b.id)), relations: origIdToZoteroId};
 }
 
 function parseCSVLine(line: string): string[] {
@@ -221,11 +202,11 @@ function createZoteroItemFromCsv(headers: string[], values: string[]): { origId:
             id: newId(),
             title: 'USTC',
             url: `https://www.ustc.ac.uk/editions/${record.id}`,
-            linkMode: '3' // no idea what this means
+            linkMode: '3'
         }
     ]
 
-    return {origId: record.id, item};
+    return {origId: record.sn, item};
 }
 
 function parsePersonList(personString: string): Person[] {
@@ -243,11 +224,6 @@ function parsePersonList(personString: string): Person[] {
         if (trimmed.includes(',')) {
             const [lastName, firstName] = trimmed.split(',').map(s => s.trim());
             people.push({lastName, firstName});
-        } else if (trimmed.includes(' ')) {
-            const nameParts = trimmed.split(' ');
-            const lastName = nameParts.pop() || '';
-            const firstName = nameParts.join(' ');
-            people.push({lastName, firstName});
         } else {
             people.push({lastName: trimmed, firstName: ''});
         }
@@ -256,16 +232,9 @@ function parsePersonList(personString: string): Person[] {
     return people;
 }
 
-/**
- * Converts JSON data to Zotero RDF format
- * @param jsonData The JSON data conforming to the schema
- * @returns A string containing the RDF XML
- */
 function convertJsonToRdf(jsonData: ZoteroData): string {
-    // Reset ID counter for deterministic IDs
     idCounter = 1;
-    
-    // Create XML header with all required namespaces
+
     let rdf = `<rdf:RDF
  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
  xmlns:z="http://www.zotero.org/namespaces/export#"
@@ -277,15 +246,12 @@ function convertJsonToRdf(jsonData: ZoteroData): string {
  xmlns:prism="http://prismstandard.org/namespaces/1.2/basic/"
  xmlns:vcard="http://nwalsh.com/rdf/vCard#">`;
 
-    // Sort items by id for consistent output
     const sortedItems = [...jsonData.items].sort((a, b) => a.id.localeCompare(b.id));
-    
-    // Process each item
+
     for (const item of sortedItems) {
         rdf += processItem(item);
     }
 
-    // Close the RDF tag
     rdf += `
     <z:Collection rdf:about="#collection_${newId('coll_')}">
         <dc:title>ustc</dc:title>
@@ -296,13 +262,7 @@ ${sortedItems.map(item => `        <dcterms:hasPart rdf:resource="#item_${item.i
     return rdf;
 }
 
-/**
- * Process a single Zotero item
- * @param item The item to process
- * @returns RDF XML fragment for the item
- */
 function processItem(item: ZoteroItem): string {
-    // Map Zotero item types to RDF element types
     const itemTypeMap: { [key: string]: string } = {
         'book': 'bib:Book',
         'journalArticle': 'bib:Article',
@@ -310,14 +270,12 @@ function processItem(item: ZoteroItem): string {
         'webpage': 'bib:Document',
         'attachment': 'z:Attachment',
         'note': 'bib:Memo'
-        // Add more mappings as needed
     };
 
     const itemType = itemTypeMap[item.itemType] || 'bib:Document';
     let itemXml = `\n    <${itemType} rdf:about="#item_${item.id}">
         <z:itemType>${item.itemType}</z:itemType>`;
 
-    // Add series information
     if (item.series) {
         itemXml += `\n        <dcterms:isPartOf>
             <bib:Series>
@@ -331,7 +289,6 @@ function processItem(item: ZoteroItem): string {
         </dcterms:isPartOf>`;
     }
 
-    // Add publisher information
     if (item.publisher) {
         itemXml += `\n        <dc:publisher>
             <foaf:Organization>
@@ -345,53 +302,38 @@ function processItem(item: ZoteroItem): string {
         </dc:publisher>`;
     }
 
-    // Add people in different roles
-
-    // Add authors
     if (item.authors && item.authors.length > 0) {
-        const sortedAuthors = [...item.authors].sort((a, b) => 
+        const sortedAuthors = [...item.authors].sort((a, b) =>
             a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
         itemXml += addPeople(sortedAuthors, 'bib:authors');
     }
 
-    // Add contributors
     if (item.contributors && item.contributors.length > 0) {
-        const sortedContributors = [...item.contributors].sort((a, b) => 
+        const sortedContributors = [...item.contributors].sort((a, b) =>
             a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
         itemXml += addPeople(sortedContributors, 'bib:contributors');
     }
 
-    // Add editors
     if (item.editors && item.editors.length > 0) {
-        const sortedEditors = [...item.editors].sort((a, b) => 
+        const sortedEditors = [...item.editors].sort((a, b) =>
             a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
         itemXml += addPeople(sortedEditors, 'bib:editors');
     }
 
-    // Add series editors
     if (item.seriesEditors && item.seriesEditors.length > 0) {
-        const sortedSeriesEditors = [...item.seriesEditors].sort((a, b) => 
+        const sortedSeriesEditors = [...item.seriesEditors].sort((a, b) =>
             a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
         itemXml += addPeople(sortedSeriesEditors, 'z:seriesEditors');
     }
 
-    // Add translators
     if (item.translators && item.translators.length > 0) {
-        const sortedTranslators = [...item.translators].sort((a, b) => 
+        const sortedTranslators = [...item.translators].sort((a, b) =>
             a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
         itemXml += addPeople(sortedTranslators, 'z:translators');
     }
 
-    // Add basic metadata
     if (item.title) {
         itemXml += `\n        <dc:title>${escapeXml(item.title)}</dc:title>`;
-    }
-
-    if (item.relatedTo) {
-        const sortedRelatedIds = [...item.relatedTo].sort();
-        for (const relatedId of sortedRelatedIds) {
-            itemXml += `\n        <dc:relation rdf:resource="#item_${relatedId}"/>`;
-        }
     }
 
     if (item.abstract) {
@@ -422,29 +364,24 @@ function processItem(item: ZoteroItem): string {
         itemXml += `\n        <z:language>${escapeXml(item.language)}</z:language>`;
     }
 
-    // Add ISBN
     if (item.isbn) {
         itemXml += `\n        <dc:identifier>ISBN ${escapeXml(item.isbn)}</dc:identifier>`;
     }
 
-    // Add short title
     if (item.shortTitle) {
         itemXml += `\n        <z:shortTitle>${escapeXml(item.shortTitle)}</z:shortTitle>`;
     }
 
-    // Add URL
     if (item.url) {
         itemXml += `\n        <dc:identifier>
             <dcterms:URI><rdf:value>${escapeXml(item.url)}</rdf:value></dcterms:URI>
         </dc:identifier>`;
     }
 
-    // Add date submitted
     if (item.dateSubmitted) {
         itemXml += `\n        <dcterms:dateSubmitted>${escapeXml(item.dateSubmitted)}</dcterms:dateSubmitted>`;
     }
 
-    // Add archive info
     if (item.archive) {
         itemXml += `\n        <z:archive>${escapeXml(item.archive)}</z:archive>`;
     }
@@ -453,31 +390,26 @@ function processItem(item: ZoteroItem): string {
         itemXml += `\n        <dc:coverage>${escapeXml(item.archiveLocation)}</dc:coverage>`;
     }
 
-    // Add library catalog
     if (item.libraryCatalog) {
         itemXml += `\n        <z:libraryCatalog>${escapeXml(item.libraryCatalog)}</z:libraryCatalog>`;
     }
 
-    // Add call number
     if (item.callNumber) {
         itemXml += `\n        <dc:subject>
            <dcterms:LCC><rdf:value>${escapeXml(item.callNumber)}</rdf:value></dcterms:LCC>
         </dc:subject>`;
     }
 
-    // Add rights
     if (item.rights) {
         itemXml += `\n        <dc:rights>${escapeXml(item.rights)}</dc:rights>`;
     }
 
-    // Add extra/description
     if (item.extra) {
         itemXml += `\n        <dc:description>${escapeXml(item.extra)}</dc:description>`;
     } else if (item.description) {
         itemXml += `\n        <dc:description>${escapeXml(item.description)}</dc:description>`;
     }
 
-    // Add subjects
     if (item.subjects && item.subjects.length > 0) {
         const sortedSubjects = [...item.subjects].sort();
         for (const subject of sortedSubjects) {
@@ -485,7 +417,6 @@ function processItem(item: ZoteroItem): string {
         }
     }
 
-    // Add references
     if (item.isReferencedBy && item.isReferencedBy.length > 0) {
         const sortedRefs = [...item.isReferencedBy].sort();
         for (const ref of sortedRefs) {
@@ -500,10 +431,8 @@ function processItem(item: ZoteroItem): string {
         }
     }
 
-    // Close the item element
     itemXml += `\n    </${itemType}>`;
 
-    // Add attachments
     if (item.attachments && item.attachments.length > 0) {
         const sortedAttachments = [...item.attachments].sort((a, b) => a.id.localeCompare(b.id));
         for (const attachment of sortedAttachments) {
@@ -535,7 +464,6 @@ function processItem(item: ZoteroItem): string {
         }
     }
 
-    // Add memos (notes)
     if (item.memos && item.memos.length > 0) {
         const sortedMemos = [...item.memos].sort((a, b) => a.id.localeCompare(b.id));
         for (const memo of sortedMemos) {
@@ -548,12 +476,6 @@ function processItem(item: ZoteroItem): string {
     return itemXml;
 }
 
-/**
- * Helper function to add people (authors, editors, etc.)
- * @param people Array of Person objects
- * @param role Role tag (bib:authors, bib:editors, etc.)
- * @returns RDF XML fragment for the people
- */
 function addPeople(people: Person[], role: string): string {
     let xml = `\n        <${role}>
             <rdf:Seq>`;
@@ -573,16 +495,11 @@ function addPeople(people: Person[], role: string): string {
     return xml;
 }
 
-/**
- * Escape XML special characters
- * @param str Input string
- * @returns Escaped string
- */
 function escapeXml(str: string): string {
     if (!str) return '';
-    
+
     return str
-        .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, '') // Remove non-UTF8 chars
+        .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, '')
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -590,61 +507,34 @@ function escapeXml(str: string): string {
         .replace(/'/g, '&apos;');
 }
 
-/**
- * Main function to convert CSV file to RDF file
- * @param inputPath Path to CSV input file
- * @param outputPath Path to RDF output file
- */
-function convertCsvFileToRdf(inputPath: string, outputPath: string): void {
+const writeOutputs = (jsonData: ZoteroData) => {
+    const rdfStr = convertJsonToRdf(jsonData);
+    const outputPath = inputPath.split(".")[0] + '.rdf';
+    fs.writeFileSync(outputPath, rdfStr, 'utf8');
+
+    const relationsPath = inputPath.split(".")[0] + '_relations.json';
+    fs.writeFileSync(relationsPath, JSON.stringify(jsonData.relations, null, 2), 'utf8');
+
+    console.log(`Successfully converted ${inputPath} to RDF file`);
+}
+
+function convertCsvFileToRdf(inputPath: string): void {
     try {
-        // Read and parse CSV file
         const csvStr = fs.readFileSync(inputPath, 'utf8')
-            .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, ''); // Remove non-UTF8 chars
+            .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, '');
         const jsonData = parseCsvToJson(csvStr);
-
-        // Convert to RDF
-        const rdfStr = convertJsonToRdf(jsonData);
-
-        // Write RDF to file
-        fs.writeFileSync(outputPath, rdfStr, 'utf8');
-
-        console.log(`Successfully converted ${inputPath} to ${outputPath}`);
+        writeOutputs(jsonData);
     } catch (error) {
         console.error('Error converting CSV to RDF:', error);
     }
 }
 
-/**
- * Main function to convert JSON file to RDF file
- * @param inputPath Path to JSON input file
- * @param outputPath Path to RDF output file
- */
-function convertJsonFileToRdf(inputPath: string, outputPath: string): void {
+function convertJsonFileToRdf(inputPath: string): void {
     try {
-        // Read and parse JSON file
         const jsonStr = fs.readFileSync(inputPath, 'utf8')
-            .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, ''); // Remove non-UTF8 chars
+            .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, '');
         const jsonData = JSON.parse(jsonStr) as ZoteroData;
-        
-        // Sort the collections if they exist
-        if (jsonData.collections) {
-            jsonData.collections = jsonData.collections.sort((a, b) => a.id.localeCompare(b.id));
-            
-            // Sort items within collections
-            for (const collection of jsonData.collections) {
-                if (collection.items) {
-                    collection.items = [...collection.items].sort();
-                }
-            }
-        }
-
-        // Convert to RDF
-        const rdfStr = convertJsonToRdf(jsonData);
-
-        // Write RDF to file
-        fs.writeFileSync(outputPath, rdfStr, 'utf8');
-
-        console.log(`Successfully converted ${inputPath} to ${outputPath}`);
+        writeOutputs(jsonData);
     } catch (error) {
         console.error('Error converting JSON to RDF:', error);
     }
@@ -654,17 +544,15 @@ function isCSVFile(filePath: string): boolean {
     return filePath.toLowerCase().endsWith('.csv');
 }
 
-if (process.argv.length < 4) {
-    console.log('Usage: ts-node rdf_converter.mts <input-file> <output-rdf-file>');
-    console.log('Input file can be either JSON or CSV');
+if (process.argv.length < 2) {
+    console.log('Usage: tsx <script> <input-file>');
     process.exit(1);
 }
 
 const inputPath = process.argv[2];
-const outputPath = process.argv[3];
 
 if (isCSVFile(inputPath)) {
-    convertCsvFileToRdf(inputPath, outputPath);
+    convertCsvFileToRdf(inputPath);
 } else {
-    convertJsonFileToRdf(inputPath, outputPath);
+    convertJsonFileToRdf(inputPath);
 }
