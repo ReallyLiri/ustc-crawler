@@ -79,6 +79,9 @@ interface ZoteroData {
 }
 
 function parseCsvToJson(csvContent: string): ZoteroData {
+    // Reset ID counter for deterministic IDs
+    idCounter = 1;
+    
     const lines = csvContent.split('\n');
     const headers = lines[0].split(',').map(header => header.trim());
 
@@ -90,10 +93,6 @@ function parseCsvToJson(csvContent: string): ZoteroData {
             continue;
         }
 
-        if (i > 169) {
-            break
-        }
-
         const values = parseCSVLine(lines[i]);
         if (values.length !== headers.length) continue;
 
@@ -103,16 +102,25 @@ function parseCsvToJson(csvContent: string): ZoteroData {
         clusters[origId].push(item.id);
     }
 
-    Object.values(clusters).forEach((ids) => {
+    // Use sorted keys for consistent processing order
+    const sortedClusterKeys = Object.keys(clusters).sort();
+    
+    for (const origId of sortedClusterKeys) {
+        const ids = clusters[origId];
         if (ids.length === 1) {
-            return
+            continue;
         }
-        ids.forEach(id => {
-            items[id].relatedTo = ids.filter(zId => zId !== id);
-        })
-    })
+        
+        // Sort ids for consistent ordering
+        const sortedIds = [...ids].sort();
+        
+        sortedIds.forEach(id => {
+            items[id].relatedTo = sortedIds.filter(zId => zId !== id);
+        });
+    }
 
-    return {items: Object.values(items)};
+    // Return items sorted by id
+    return {items: Object.values(items).sort((a, b) => a.id.localeCompare(b.id))};
 }
 
 function parseCSVLine(line: string): string[] {
@@ -143,12 +151,13 @@ function parseCSVLine(line: string): string[] {
     return result;
 }
 
-const newId = () => String(Math.floor(Math.random() * 1000000));
+let idCounter = 1;
+const newId = (prefix = '') => `${prefix}${idCounter++}`;
 
 function createZoteroItemFromCsv(headers: string[], values: string[]): { origId: string, item: ZoteroItem } {
     const record: Record<string, string> = {};
     for (let i = 0; i < headers.length; i++) {
-        record[headers[i]] = values[i];
+        record[headers[i]] = values[i] ? values[i].replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, '') : '';
     }
 
     const item: ZoteroItem = {
@@ -253,6 +262,9 @@ function parsePersonList(personString: string): Person[] {
  * @returns A string containing the RDF XML
  */
 function convertJsonToRdf(jsonData: ZoteroData): string {
+    // Reset ID counter for deterministic IDs
+    idCounter = 1;
+    
     // Create XML header with all required namespaces
     let rdf = `<rdf:RDF
  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -265,16 +277,19 @@ function convertJsonToRdf(jsonData: ZoteroData): string {
  xmlns:prism="http://prismstandard.org/namespaces/1.2/basic/"
  xmlns:vcard="http://nwalsh.com/rdf/vCard#">`;
 
+    // Sort items by id for consistent output
+    const sortedItems = [...jsonData.items].sort((a, b) => a.id.localeCompare(b.id));
+    
     // Process each item
-    for (const item of jsonData.items) {
+    for (const item of sortedItems) {
         rdf += processItem(item);
     }
 
     // Close the RDF tag
     rdf += `
-    <z:Collection rdf:about="#collection_${newId()}">
+    <z:Collection rdf:about="#collection_${newId('coll_')}">
         <dc:title>ustc</dc:title>
-${jsonData.items.map(item => `        <dcterms:hasPart rdf:resource="#item_${item.id}"/>`).join('\n')}
+${sortedItems.map(item => `        <dcterms:hasPart rdf:resource="#item_${item.id}"/>`).join('\n')}
     </z:Collection>
 </rdf:RDF>`;
 
@@ -334,27 +349,37 @@ function processItem(item: ZoteroItem): string {
 
     // Add authors
     if (item.authors && item.authors.length > 0) {
-        itemXml += addPeople(item.authors, 'bib:authors');
+        const sortedAuthors = [...item.authors].sort((a, b) => 
+            a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
+        itemXml += addPeople(sortedAuthors, 'bib:authors');
     }
 
     // Add contributors
     if (item.contributors && item.contributors.length > 0) {
-        itemXml += addPeople(item.contributors, 'bib:contributors');
+        const sortedContributors = [...item.contributors].sort((a, b) => 
+            a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
+        itemXml += addPeople(sortedContributors, 'bib:contributors');
     }
 
     // Add editors
     if (item.editors && item.editors.length > 0) {
-        itemXml += addPeople(item.editors, 'bib:editors');
+        const sortedEditors = [...item.editors].sort((a, b) => 
+            a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
+        itemXml += addPeople(sortedEditors, 'bib:editors');
     }
 
     // Add series editors
     if (item.seriesEditors && item.seriesEditors.length > 0) {
-        itemXml += addPeople(item.seriesEditors, 'z:seriesEditors');
+        const sortedSeriesEditors = [...item.seriesEditors].sort((a, b) => 
+            a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
+        itemXml += addPeople(sortedSeriesEditors, 'z:seriesEditors');
     }
 
     // Add translators
     if (item.translators && item.translators.length > 0) {
-        itemXml += addPeople(item.translators, 'z:translators');
+        const sortedTranslators = [...item.translators].sort((a, b) => 
+            a.lastName.localeCompare(b.lastName) || a.firstName.localeCompare(b.firstName));
+        itemXml += addPeople(sortedTranslators, 'z:translators');
     }
 
     // Add basic metadata
@@ -363,7 +388,8 @@ function processItem(item: ZoteroItem): string {
     }
 
     if (item.relatedTo) {
-        for (const relatedId of item.relatedTo) {
+        const sortedRelatedIds = [...item.relatedTo].sort();
+        for (const relatedId of sortedRelatedIds) {
             itemXml += `\n        <dc:relation rdf:resource="#item_${relatedId}"/>`;
         }
     }
@@ -453,20 +479,23 @@ function processItem(item: ZoteroItem): string {
 
     // Add subjects
     if (item.subjects && item.subjects.length > 0) {
-        for (const subject of item.subjects) {
+        const sortedSubjects = [...item.subjects].sort();
+        for (const subject of sortedSubjects) {
             itemXml += `\n        <dc:subject>${escapeXml(subject)}</dc:subject>`;
         }
     }
 
     // Add references
     if (item.isReferencedBy && item.isReferencedBy.length > 0) {
-        for (const ref of item.isReferencedBy) {
+        const sortedRefs = [...item.isReferencedBy].sort();
+        for (const ref of sortedRefs) {
             itemXml += `\n        <dcterms:isReferencedBy rdf:resource="#item_${ref}"/>`;
         }
     }
 
     if (item.attachments && item.attachments.length > 0) {
-        for (const attachment of item.attachments) {
+        const sortedAttachments = [...item.attachments].sort((a, b) => a.id.localeCompare(b.id));
+        for (const attachment of sortedAttachments) {
             itemXml += `\n        <link:link rdf:resource="#item_${attachment.id}"/>`;
         }
     }
@@ -476,7 +505,8 @@ function processItem(item: ZoteroItem): string {
 
     // Add attachments
     if (item.attachments && item.attachments.length > 0) {
-        for (const attachment of item.attachments) {
+        const sortedAttachments = [...item.attachments].sort((a, b) => a.id.localeCompare(b.id));
+        for (const attachment of sortedAttachments) {
             itemXml += `\n    <z:Attachment rdf:about="#item_${attachment.id}">
         <z:itemType>attachment</z:itemType>
         <dc:title>${escapeXml(attachment.title)}</dc:title>`;
@@ -507,7 +537,8 @@ function processItem(item: ZoteroItem): string {
 
     // Add memos (notes)
     if (item.memos && item.memos.length > 0) {
-        for (const memo of item.memos) {
+        const sortedMemos = [...item.memos].sort((a, b) => a.id.localeCompare(b.id));
+        for (const memo of sortedMemos) {
             itemXml += `\n    <bib:Memo rdf:about="#item_${memo.id}">
         <rdf:value>${escapeXml(memo.value)}</rdf:value>
     </bib:Memo>`;
@@ -548,7 +579,10 @@ function addPeople(people: Person[], role: string): string {
  * @returns Escaped string
  */
 function escapeXml(str: string): string {
+    if (!str) return '';
+    
     return str
+        .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, '') // Remove non-UTF8 chars
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
@@ -564,7 +598,8 @@ function escapeXml(str: string): string {
 function convertCsvFileToRdf(inputPath: string, outputPath: string): void {
     try {
         // Read and parse CSV file
-        const csvStr = fs.readFileSync(inputPath, 'utf8');
+        const csvStr = fs.readFileSync(inputPath, 'utf8')
+            .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, ''); // Remove non-UTF8 chars
         const jsonData = parseCsvToJson(csvStr);
 
         // Convert to RDF
@@ -587,8 +622,21 @@ function convertCsvFileToRdf(inputPath: string, outputPath: string): void {
 function convertJsonFileToRdf(inputPath: string, outputPath: string): void {
     try {
         // Read and parse JSON file
-        const jsonStr = fs.readFileSync(inputPath, 'utf8');
+        const jsonStr = fs.readFileSync(inputPath, 'utf8')
+            .replace(/[^\x09\x0A\x0D\x20-\uD7FF\uE000-\uFFFD]/g, ''); // Remove non-UTF8 chars
         const jsonData = JSON.parse(jsonStr) as ZoteroData;
+        
+        // Sort the collections if they exist
+        if (jsonData.collections) {
+            jsonData.collections = jsonData.collections.sort((a, b) => a.id.localeCompare(b.id));
+            
+            // Sort items within collections
+            for (const collection of jsonData.collections) {
+                if (collection.items) {
+                    collection.items = [...collection.items].sort();
+                }
+            }
+        }
 
         // Convert to RDF
         const rdfStr = convertJsonToRdf(jsonData);
