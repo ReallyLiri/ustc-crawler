@@ -63,6 +63,7 @@ interface ZoteroItem {
     attachments?: Attachment[];
     memos?: Memo[];
     isReferencedBy?: string[];
+    relatedTo?: string[];
 }
 
 interface ZoteroCollection {
@@ -75,6 +76,169 @@ interface ZoteroCollection {
 interface ZoteroData {
     items: ZoteroItem[];
     collections?: ZoteroCollection[];
+}
+
+function parseCsvToJson(csvContent: string): ZoteroData {
+    const lines = csvContent.split('\n');
+    const headers = lines[0].split(',').map(header => header.trim());
+
+    const items: Record<string, ZoteroItem> = {};
+
+    const clusters: Record<string, string[]> = {};
+    for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+
+        const values = parseCSVLine(lines[i]);
+        if (values.length !== headers.length) continue;
+
+        const {item, origId} = createZoteroItemFromCsv(headers, values);
+        items[item.id] = item;
+        clusters[origId] = clusters[origId] || [];
+        clusters[origId].push(item.id);
+    }
+
+    Object.values(clusters).forEach((ids) => {
+        if (ids.length === 1) {
+            return
+        }
+        ids.forEach(id => {
+            items[id].relatedTo = ids.filter(zId => zId !== id);
+        })
+    })
+
+    return {items: Object.values(items)};
+}
+
+function parseCSVLine(line: string): string[] {
+    const result: string[] = [];
+    let insideQuotes = false;
+    let currentValue = '';
+
+    for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        const nextChar = line[i + 1];
+
+        if (char === '"' && !insideQuotes) {
+            insideQuotes = true;
+        } else if (char === '"' && nextChar === '"') {
+            currentValue += '"';
+            i++;
+        } else if (char === '"' && insideQuotes) {
+            insideQuotes = false;
+        } else if (char === ',' && !insideQuotes) {
+            result.push(currentValue);
+            currentValue = '';
+        } else {
+            currentValue += char;
+        }
+    }
+
+    result.push(currentValue);
+    return result;
+}
+
+const newId = () => String(Math.floor(Math.random() * 1000000));
+
+function createZoteroItemFromCsv(headers: string[], values: string[]): { origId: string, item: ZoteroItem } {
+    const record: Record<string, string> = {};
+    for (let i = 0; i < headers.length; i++) {
+        record[headers[i]] = values[i];
+    }
+
+    const item: ZoteroItem = {
+        id: newId(),
+        itemType: {
+            "book": "book",
+            "broadsheet": "document"
+        }[record.type.toLowerCase()] || "book",
+    };
+
+    if (record.title) {
+        item.shortTitle = record.title;
+    }
+
+    if (record.language) {
+        item.language = record.language;
+    }
+
+    if (record.year) {
+        item.date = record.year;
+    }
+
+    if (record.digitised_url) {
+        item.url = record.digitised_url;
+    }
+
+    if (record.author) {
+        item.authors = parsePersonList(record.author);
+    }
+
+    if (record.classification) {
+        item.subjects = record.classification.split(';').map(s => `ustc_calssification:${s.trim()}`);
+    }
+
+    if (record.copy_location && record.copy_shelfmark) {
+        item.archive = record.copy_location;
+        item.archiveLocation = record.copy_shelfmark;
+        item.callNumber = record.copy_shelfmark;
+    }
+
+    item.publisher = {
+        location: [record.coutnry, record.place, record.region].filter(Boolean).join(', '),
+        name: record.printer_name?.includes(';')
+            ? record.printer_name.split(';').map(s => s.trim()).join(', ')
+            : record.printer_name
+    };
+
+    item.extra = [
+        record.colophon ? `Colophon: ${record.colophon}` : '',
+        record.colophon ? `Colophon source: ustc` : '',
+        record.format ? `Format: ${record.format}` : '',
+        record.heading ? `Heading: ${record.heading}` : '',
+        record.imprint ? `Imprint: ${record.imprint}` : '',
+        record.is_lost ? 'Lost book' : '',
+        record.pagination ? `Pagination: ${record.pagination}` : '',
+        record.signatures ? `Signatures: ${record.signatures}` : '',
+    ].filter(Boolean).join("\n")
+
+    item.attachments = [
+        {
+            id: newId(),
+            title: 'USTC',
+            url: `https://www.ustc.ac.uk/editions/${record.id}`,
+            linkMode: '3' // no idea what this means
+        }
+    ]
+
+    return {origId: record.id, item};
+}
+
+function parsePersonList(personString: string): Person[] {
+    if (!personString) return [];
+
+    const people: Person[] = [];
+    const personParts = personString.includes(';')
+        ? personString.split(';')
+        : [personString];
+
+    for (const part of personParts) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+
+        if (trimmed.includes(',')) {
+            const [lastName, firstName] = trimmed.split(',').map(s => s.trim());
+            people.push({lastName, firstName});
+        } else if (trimmed.includes(' ')) {
+            const nameParts = trimmed.split(' ');
+            const lastName = nameParts.pop() || '';
+            const firstName = nameParts.join(' ');
+            people.push({lastName, firstName});
+        } else {
+            people.push({lastName: trimmed, firstName: ''});
+        }
+    }
+
+    return people;
 }
 
 /**
@@ -186,6 +350,12 @@ function processItem(item: ZoteroItem): string {
     // Add basic metadata
     if (item.title) {
         itemXml += `\n        <dc:title>${escapeXml(item.title)}</dc:title>`;
+    }
+
+    if (item.relatedTo) {
+        for (const relatedId of item.relatedTo) {
+            itemXml += `\n        <dc:relation rdf:resource="#item_${relatedId}"/>`;
+        }
     }
 
     if (item.abstract) {
@@ -371,6 +541,29 @@ function escapeXml(str: string): string {
 }
 
 /**
+ * Main function to convert CSV file to RDF file
+ * @param inputPath Path to CSV input file
+ * @param outputPath Path to RDF output file
+ */
+function convertCsvFileToRdf(inputPath: string, outputPath: string): void {
+    try {
+        // Read and parse CSV file
+        const csvStr = fs.readFileSync(inputPath, 'utf8');
+        const jsonData = parseCsvToJson(csvStr);
+
+        // Convert to RDF
+        const rdfStr = convertJsonToRdf(jsonData);
+
+        // Write RDF to file
+        fs.writeFileSync(outputPath, rdfStr, 'utf8');
+
+        console.log(`Successfully converted ${inputPath} to ${outputPath}`);
+    } catch (error) {
+        console.error('Error converting CSV to RDF:', error);
+    }
+}
+
+/**
  * Main function to convert JSON file to RDF file
  * @param inputPath Path to JSON input file
  * @param outputPath Path to RDF output file
@@ -393,12 +586,21 @@ function convertJsonFileToRdf(inputPath: string, outputPath: string): void {
     }
 }
 
+function isCSVFile(filePath: string): boolean {
+    return filePath.toLowerCase().endsWith('.csv');
+}
+
 if (process.argv.length < 4) {
-    console.log('Usage: ts-node json-to-rdf.ts <input-json-file> <output-rdf-file>');
+    console.log('Usage: ts-node rdf_converter.mts <input-file> <output-rdf-file>');
+    console.log('Input file can be either JSON or CSV');
     process.exit(1);
 }
 
 const inputPath = process.argv[2];
 const outputPath = process.argv[3];
 
-convertJsonFileToRdf(inputPath, outputPath);
+if (isCSVFile(inputPath)) {
+    convertCsvFileToRdf(inputPath, outputPath);
+} else {
+    convertJsonFileToRdf(inputPath, outputPath);
+}
