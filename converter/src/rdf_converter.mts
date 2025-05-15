@@ -86,7 +86,13 @@ function parseCsvToJson(csvContent: string): ZoteroData {
 
     const clusters: Record<string, string[]> = {};
     for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
+        if (!lines[i].trim()) {
+            continue;
+        }
+
+        if (i > 169) {
+            break
+        }
 
         const values = parseCSVLine(lines[i]);
         if (values.length !== headers.length) continue;
@@ -248,17 +254,16 @@ function parsePersonList(personString: string): Person[] {
  */
 function convertJsonToRdf(jsonData: ZoteroData): string {
     // Create XML header with all required namespaces
-    let rdf = `<?xml version="1.0" encoding="utf-8"?>
-<rdf:RDF
+    let rdf = `<rdf:RDF
  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
  xmlns:z="http://www.zotero.org/namespaces/export#"
- xmlns:dc="http://purl.org/dc/elements/1.1/"
- xmlns:vcard="http://nwalsh.com/rdf/vCard#"
- xmlns:foaf="http://xmlns.com/foaf/0.1/"
- xmlns:bib="http://purl.org/net/biblio#"
- xmlns:link="http://purl.org/rss/1.0/modules/link/"
  xmlns:dcterms="http://purl.org/dc/terms/"
- xmlns:prism="http://prismstandard.org/namespaces/1.2/basic/">`;
+ xmlns:bib="http://purl.org/net/biblio#"
+ xmlns:foaf="http://xmlns.com/foaf/0.1/"
+ xmlns:link="http://purl.org/rss/1.0/modules/link/"
+ xmlns:dc="http://purl.org/dc/elements/1.1/"
+ xmlns:prism="http://prismstandard.org/namespaces/1.2/basic/"
+ xmlns:vcard="http://nwalsh.com/rdf/vCard#">`;
 
     // Process each item
     for (const item of jsonData.items) {
@@ -266,7 +271,12 @@ function convertJsonToRdf(jsonData: ZoteroData): string {
     }
 
     // Close the RDF tag
-    rdf += '\n</rdf:RDF>';
+    rdf += `
+    <z:Collection rdf:about="#collection_${newId()}">
+        <dc:title>ustc</dc:title>
+${jsonData.items.map(item => `        <dcterms:hasPart rdf:resource="#item_${item.id}"/>`).join('\n')}
+    </z:Collection>
+</rdf:RDF>`;
 
     return rdf;
 }
@@ -452,6 +462,12 @@ function processItem(item: ZoteroItem): string {
     if (item.isReferencedBy && item.isReferencedBy.length > 0) {
         for (const ref of item.isReferencedBy) {
             itemXml += `\n        <dcterms:isReferencedBy rdf:resource="#item_${ref}"/>`;
+        }
+    }
+
+    if (item.attachments && item.attachments.length > 0) {
+        for (const attachment of item.attachments) {
+            itemXml += `\n        <link:link rdf:resource="#item_${attachment.id}"/>`;
         }
     }
 
