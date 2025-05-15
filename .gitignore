@@ -13,3 +13,5 @@ wheels/
 .idea
 
 node_modules/
+
+out/*.rdf
