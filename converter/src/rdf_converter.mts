@@ -192,7 +192,7 @@ function createZoteroItemFromCsv(headers: string[], values: string[]): { origId:
         record.format ? `Format: ${record.format}` : '',
         record.heading ? `Heading: ${record.heading}` : '',
         record.imprint ? `Imprint: ${record.imprint}` : '',
-        record.is_lost ? 'Lost book' : '',
+        record.is_lost ? 'Lost: true' : '',
         record.pagination ? `Pagination: ${record.pagination}` : '',
         record.signatures ? `Signatures: ${record.signatures}` : '',
     ].filter(Boolean).join("\n")
@@ -252,14 +252,6 @@ function convertJsonToRdf(jsonData: ZoteroData): string {
         rdf += processItem(item);
     }
 
-    /*
-    rdf += `
-    <z:Collection rdf:about="#collection_${newId('coll_')}">
-        <dc:title>ustc</dc:title>
-${sortedItems.map(item => `        <dcterms:hasPart rdf:resource="#item_${item.id}"/>`).join('\n')}
-    </z:Collection>
-</rdf:RDF>`;
-     */
     rdf += "\n</rdf:RDF>";
 
     return rdf;
