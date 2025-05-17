@@ -29,7 +29,7 @@ def role_to_person_type(role):
         "Pseudonym": "author",
         "Respondent": "contributor",
         "Translator": "translator",
-    }[role] or "author"
+    }.get(role, "author")
 
 
 def parse_record(data):
@@ -54,9 +54,11 @@ def parse_record(data):
                 edition_data[key] = value
                 continue
             base_name, suffix = key.rsplit("_", 1)
+            if base_name == "author_role":
+                continue
             if suffix.isdigit():
-                if base_name == "author":
-                    role = edition[f"role_{suffix}"]
+                if base_name == "author_name":
+                    role = edition.get(f"author_role_{suffix}", "author")
                     base_name = role_to_person_type(role)
                 if base_name not in field_groups:
                     field_groups[base_name] = []
@@ -68,15 +70,15 @@ def parse_record(data):
             edition_data[key] = value
 
     for base_name, fields in field_groups.items():
-        if base_name == "author_role":
-            continue
         fields.sort()
         values = [edition[field] for field in fields if edition[field]]
         if values:
             edition_data[base_name] = ";".join(sorted(values))
 
     edition_data["is_digitised"] = len(digitisations) > 0
+    edition_data["digitised_count"] = len(digitisations)
     edition_data["has_copies"] = len(copies) > 0
+    edition_data["copy_count"] = len(copies)
 
     if len(digitisations) == 0 and len(copies) == 0:
         row = edition_data.copy()

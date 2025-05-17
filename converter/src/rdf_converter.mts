@@ -168,6 +168,15 @@ function createZoteroItemFromCsv(headers: string[], values: string[]): { origId:
     if (record.author) {
         item.authors = parsePersonList(record.author);
     }
+    if (record.contributor) {
+        item.contributors = parsePersonList(record.contributor);
+    }
+    if (record.editor) {
+        item.editors = parsePersonList(record.editor);
+    }
+    if (record.translator) {
+        item.translators = parsePersonList(record.translator);
+    }
 
     if (record.classification) {
         item.subjects = record.classification.split(';').map(s => `ustc_calssification:${s.trim()}`);
@@ -187,12 +196,16 @@ function createZoteroItemFromCsv(headers: string[], values: string[]): { origId:
     };
 
     item.extra = [
+        record.is_lost ? 'Lost: true' : '',
+        `Digitised: ${record.digitised ? 'true' : 'false'}`,
+        `Digitisation count: ${record.digitised_count || 0}`,
+        `Has copies: ${record.has_copies ? 'true' : 'false'}`,
+        `Copies count: ${record.copies_count || 0}`,
         record.colophon ? `Colophon: ${record.colophon}` : '',
         record.colophon ? `Colophon source: ustc` : '',
         record.format ? `Format: ${record.format}` : '',
         record.heading ? `Heading: ${record.heading}` : '',
         record.imprint ? `Imprint: ${record.imprint}` : '',
-        record.is_lost ? 'Lost: true' : '',
         record.pagination ? `Pagination: ${record.pagination}` : '',
         record.signatures ? `Signatures: ${record.signatures}` : '',
     ].filter(Boolean).join("\n")
@@ -210,7 +223,9 @@ function createZoteroItemFromCsv(headers: string[], values: string[]): { origId:
 }
 
 function parsePersonList(personString: string): Person[] {
-    if (!personString) return [];
+    if (!personString) {
+        return [];
+    }
 
     const people: Person[] = [];
     const personParts = personString.includes(';')
@@ -219,7 +234,9 @@ function parsePersonList(personString: string): Person[] {
 
     for (const part of personParts) {
         const trimmed = part.trim();
-        if (!trimmed) continue;
+        if (!trimmed) {
+            continue;
+        }
 
         if (trimmed.includes(',')) {
             const [lastName, firstName] = trimmed.split(',').map(s => s.trim());
