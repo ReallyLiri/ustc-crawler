@@ -16,6 +16,22 @@ def load_ids() -> List[str]:
         return json.load(f)
 
 
+def role_to_person_type(role):
+    return {
+        "Commentator": "contributor",
+        "Contributor": "contributor",
+        "Defendant": "contributor",
+        "Editor": "editor",
+        "Engraver": "contributor",
+        "Illustrator": "contributor",
+        "Principal Author": "author",
+        "Proponent": "contributor",
+        "Pseudonym": "author",
+        "Respondent": "contributor",
+        "Translator": "translator",
+    }[role] or "author"
+
+
 def parse_record(data):
     results = []
     edition = data["props"]["edition"]
@@ -24,8 +40,6 @@ def parse_record(data):
 
     edition_data = {
         'is_lost': False,
-        'is_digitised': False,
-        'is_copy': False,
         'digitised_url': '',
         'copy_location': '',
         'copy_shelfmark': '',
@@ -41,26 +55,28 @@ def parse_record(data):
                 continue
             base_name, suffix = key.rsplit("_", 1)
             if suffix.isdigit():
+                if base_name == "author":
+                    role = edition[f"role_{suffix}"]
+                    base_name = role_to_person_type(role)
                 if base_name not in field_groups:
                     field_groups[base_name] = []
                 field_groups[base_name].append(key)
                 continue
             if base_name not in ["female", "created", "updated", "fingerprint"]:
                 edition_data[key] = value
-        else:
+        elif key not in ["id"]:
             edition_data[key] = value
 
     for base_name, fields in field_groups.items():
         if base_name == "author_role":
             continue
         fields.sort()
-        if base_name == "author_name":
-            values = [f"{edition[n]} ({edition[r]})".strip() if edition[r] else edition[n] for n, r in zip(field_groups["author_name"], field_groups["author_role"]) if edition[n] or edition[r]]
-            base_name = "author"
-        else:
-            values = [edition[field] for field in fields if edition[field]]
+        values = [edition[field] for field in fields if edition[field]]
         if values:
             edition_data[base_name] = ";".join(sorted(values))
+
+    edition_data["is_digitised"] = len(digitisations) > 0
+    edition_data["has_copies"] = len(copies) > 0
 
     if len(digitisations) == 0 and len(copies) == 0:
         row = edition_data.copy()
@@ -70,14 +86,12 @@ def parse_record(data):
     for digitisation in digitisations:
         if digitisation:
             row = edition_data.copy()
-            row["is_digitised"] = True
             row["digitised_url"] = digitisation.get("url", "")
             results.append(row)
 
     for copy in copies:
         if copy:
             row = edition_data.copy()
-            row["is_copy"] = True
             row["copy_location"] = f"{copy.get('name', '')} ({copy.get('city', '')}, {copy.get('country', '')})"
             row["copy_shelfmark"] = copy.get("shelfmark", "")
             results.append(row)
@@ -130,7 +144,7 @@ def write_csv(data: List[Dict[str, Any]], output_file: str):
 def main():
     ids = load_ids()
 
-    #ids = ['75104', '2034843', '804919']
+    # ids = ['75104', '2034843', '804919']
 
     print(f"Loaded {len(ids)} test IDs")
 
