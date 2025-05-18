@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "pyzotero>=1.6.11",
     "requests>=2.32.3",
     "tqdm>=4.67.1",
 ]

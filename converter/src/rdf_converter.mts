@@ -196,11 +196,12 @@ function createZoteroItemFromCsv(headers: string[], values: string[]): { origId:
     };
 
     item.extra = [
-        record.is_lost ? 'Lost: true' : '',
-        `Digitised: ${record.digitised ? 'true' : 'false'}`,
+        `USTC ID: ${record.sn}`,
+        `Lost: ${record.is_lost}`,
+        `Digitised: ${record.is_digitised || false}`,
         `Digitisation count: ${record.digitised_count || 0}`,
-        `Has copies: ${record.has_copies ? 'true' : 'false'}`,
-        `Copies count: ${record.copies_count || 0}`,
+        `Has copies: ${record.has_copies || false}`,
+        `Copies count: ${record.copy_count || 0}`,
         record.colophon ? `Colophon: ${record.colophon}` : '',
         record.colophon ? `Colophon source: ustc` : '',
         record.format ? `Format: ${record.format}` : '',
@@ -524,10 +525,6 @@ const writeOutputs = (jsonData: ZoteroData) => {
     const outputPath = inputPath.replace(/\.[^/.]+$/, '') + '.rdf';
     console.log(`Writing RDF to ${outputPath}`);
     fs.writeFileSync(outputPath, rdfStr, 'utf8');
-
-    const relationsPath = inputPath.replace(/\.[^/.]+$/, '') + '_relations.json';
-    fs.writeFileSync(relationsPath, JSON.stringify(jsonData.relations, null, 2), 'utf8');
-    console.log(`Writing relations to ${relationsPath}`);
 
     console.log(`Successfully converted ${inputPath} to RDF file`);
 }
