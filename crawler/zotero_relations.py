@@ -1,4 +1,3 @@
-import json
 import os
 
 from pyzotero import zotero
@@ -17,17 +16,31 @@ while True:
     if not batch:
         break
     for item in batch:
-        item_id_to_zot_key["data"] = item["key"]
-        print(item)
+        extra = item.get("data", {}).get("extra", "")
+        if not extra:
+            continue
+        ustc_id = extra.split("USTC ID: ")[-1].split("\n")[0] if "USTC ID: " in extra else None
+        if not ustc_id:
+            continue
+        item_id_to_zot_key[ustc_id] = item_id_to_zot_key.get(ustc_id, [])
+        item_id_to_zot_key[ustc_id].append(item["key"])
+
+        is_lost = "Digitised: False" in extra and "Has copies: False" in extra
+        if is_lost:
+            print(f"USTC ID: {ustc_id} (key={item["key"]}) is lost")
+            item["data"]["extra"] = extra.replace("Lost: true", "Lost: false")
+            zot.update_item(item)
     start += limit
 
-for item_ids in item_id_to_zot_key.values():
-    for item_id in item_ids:
+print(f"Found {len(item_id_to_zot_key)} clusters")
+
+for keys in item_id_to_zot_key.values():
+    for key in keys:
         try:
-            item = zot.item(f"#item_{item_id}")
+            item = zot.item(key)
             item['data']['relations'] = {
-                'dc:relation': [f"#item_{id}" for id in item_ids if id != item_id],
+                'dc:relation': [f"#item_{k}" for k in keys if k != key],
             }
             zot.update_item(item)
         except Exception as e:
-            print(f"Error updating item {item_id}: {e}")
+            print(f"Error updating item {key}: {e}")
