@@ -32,6 +32,8 @@ def process_item(item):
     return ustc_id, item["key"]
 
 
+item_id_to_zot_key = {}
+
 if os.path.exists("out/keys.json"):
     with open("out/keys.json", "r") as f:
         item_id_to_zot_key = json.load(f)
