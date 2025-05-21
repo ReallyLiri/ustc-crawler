@@ -1,9 +1,11 @@
+import concurrent.futures
 import json
 import os
-import concurrent.futures
-from tqdm import tqdm
 
 from pyzotero import zotero
+from tqdm import tqdm
+
+zotero.timeout = 180
 
 API_KEY = os.environ['ZOTERO_API_KEY']
 LIBRARY_ID = os.environ['ZOTERO_LIBRARY_ID']
