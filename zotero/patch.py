@@ -58,9 +58,9 @@ if len(item_id_to_zot_key) == 0:
 print(f"Found {len(item_id_to_zot_key)} clusters")
 
 all_keys_tuples = []
-for keys in item_id_to_zot_key.values():
+for i, keys in enumerate(item_id_to_zot_key.values()):
     try:
-        print("Updating cluster", keys)
+        print(f"Updating cluster {i}/{len(item_id_to_zot_key)}", keys)
         for key in keys:
             item = zot.item(key)
             if len(item["data"].get("relations", [])) >= len(keys) - 1:
