@@ -39,30 +39,39 @@ if os.path.exists("out/keys.json"):
 if len(item_id_to_zot_key) == 0:
     start = 0
     limit = 100
-    all_items = []
+    failed_items = []
 
     while True:
         print(f"Fetching items from {start} to {start + limit}")
         batch = zot.collection_items(COLLECTION_KEY, itemType="book", start=start, limit=limit)
         if not batch:
             break
-        all_items.extend(batch)
+
+        for item in batch:
+            try:
+                ustc_id, key = process_item(item)
+                if ustc_id and key:
+                    item_id_to_zot_key[ustc_id] = item_id_to_zot_key.get(ustc_id, [])
+                    item_id_to_zot_key[ustc_id].append(key)
+            except Exception as e:
+                failed_items.append(item["key"])
+                print(f"Failed to process item {item['key']}: {e}")
+
         start += limit
 
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(process_item, item) for item in all_items]
-        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Processing items"):
-            ustc_id, key = future.result()
-            if ustc_id and key:
-                item_id_to_zot_key[ustc_id] = item_id_to_zot_key.get(ustc_id, [])
-                item_id_to_zot_key[ustc_id].append(key)
+    if failed_items:
+        with open("out/failed_items.txt", "w") as f:
+            for key in failed_items:
+                f.write(f"{key}\n")
 
 print(f"Found {len(item_id_to_zot_key)} clusters")
+
+exit(0)
 
 all_keys_tuples = []
 for i, keys in enumerate(item_id_to_zot_key.values()):
     try:
-        print(f"Updating cluster {i+1}/{len(item_id_to_zot_key)}", keys)
+        print(f"Updating cluster {i + 1}/{len(item_id_to_zot_key)}", keys)
         for key in keys:
             item = zot.item(key)
             if len(item["data"].get("relations", [])) >= len(keys) - 1:
